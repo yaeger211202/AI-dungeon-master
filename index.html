@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Dungeon Master</title>
+    <style>
+        body {
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            font-family: Georgia, serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #f0a500;
+            text-align: center;
+        }
+        #story-display {
+            background-color: #16213e;
+            border: 1px solid #f0a500;
+            border-radius: 8px;
+            padding: 20px;
+            height: 400px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+        #player-stats {
+            background-color: #16213e;
+            border: 1px solid #f0a500;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+        }
+        .stat {
+            color: #f0a500;
+            font-weight: bold;
+        }
+        #input-area {
+            display: flex;
+            gap: 10px;
+        }
+        #player-input {
+            flex: 1;
+            padding: 10px;
+            background-color: #16213e;
+            border: 1px solid #f0a500;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 16px;
+        }
+        #submit-btn {
+            padding: 10px 20px;
+            background-color: #f0a500;
+            border: none;
+            border-radius: 8px;
+            color: #1a1a2e;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #submit-btn:hover {
+            background-color: #e09400;
+        }
+        .dm-text {
+            color: #f0a500;
+            margin-bottom: 10px;
+        }
+        .player-text {
+            color: #e0e0e0;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚔️ AI Dungeon Master ⚔️</h1>
+   
+    <div id="player-stats">
+        <span class="stat">❤️ Health: <span id="health">100</span></span>
+        <span class="stat">🎒 Inventory: <span id="inventory">Torch, Dagger</span></span>
+        <span class="stat">📜 Quest: <span id="quest">Find the lost sword of Eldoria</span></span>
+    </div>
+
+    <div id="story-display">
+        <p class="dm-text">🎲 DM: You stand at the entrance of the dark forest. Your quest: Find the lost sword of Eldoria. What do you do?</p>
+    </div>
+
+    <div id="input-area">
+        <input type="text" id="player-input" placeholder="What do you do?"/>
+        <button id="submit-btn" onclick="sendAction()">Send ⚔️</button>
+    </div>
+
+    <script>
+        function sendAction() {
+            const input = document.getElementById('player-input');
+            const storyDisplay = document.getElementById('story-display');
+           
+            if (!input.value.trim()) return;
+
+            // Add player text
+            const playerP = document.createElement('p');
+            playerP.className = 'player-text';
+            playerP.textContent = '🧙 You: ' + input.value;
+            storyDisplay.appendChild(playerP);
+
+            // Placeholder DM response (will connect to backend later)
+            const dmP = document.createElement('p');
+            dmP.className = 'dm-text';
+            dmP.textContent = '🎲 DM: (Waiting for backend connection...)';
+            storyDisplay.appendChild(dmP);
+
+            // Scroll to bottom
+            storyDisplay.scrollTop = storyDisplay.scrollHeight;
+            input.value = '';
+        }
+
+        // Allow Enter key
+        document.getElementById('player-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendAction();
+        });
+    </script>
+</body>
+</html>
