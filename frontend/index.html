@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Dungeon Master</title>
+    <style>
+        body { background:#1a1a2e; color:#e0e0e0; font-family:Georgia,serif; max-width:850px; margin:0 auto; padding:20px; }
+        h1 { color:#f0a500; text-align:center; margin-bottom:10px; }
+        #mode-bar { display:flex; gap:8px; justify-content:center; margin-bottom:14px; }
+        .mode-btn { padding:8px 18px; background:#2a2a4e; border:1px solid #f0a500; border-radius:8px; color:#f0a500; font-weight:bold; cursor:pointer; }
+        .mode-btn.active { background:#f0a500; color:#1a1a2e; }
+        .mode-btn:hover:not(.active) { background:#3a3a5e; }
+        #story-display { background:#16213e; border:1px solid #f0a500; border-radius:8px; padding:20px; height:400px; overflow-y:auto; margin-bottom:20px; }
+        #player-stats { background:#16213e; border:1px solid #f0a500; border-radius:8px; padding:10px; margin-bottom:20px; display:flex; gap:20px; flex-wrap:wrap; transition: opacity 0.3s; }
+        #player-stats.dimmed { opacity:0.25; border-color:#444; }
+        .stat { color:#f0a500; font-weight:bold; }
+        #choices { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+        .choice-btn { padding:8px 16px; background:#f0a500; border:none; border-radius:8px; color:#1a1a2e; font-weight:bold; cursor:pointer; }
+        .choice-btn:hover { background:#e09400; }
+        #input-area { display:flex; gap:10px; }
+        #player-input { flex:1; padding:10px; background:#16213e; border:1px solid #f0a500; border-radius:8px; color:#e0e0e0; font-size:16px; }
+        #submit-btn { padding:10px 20px; background:#f0a500; border:none; border-radius:8px; color:#1a1a2e; font-weight:bold; cursor:pointer; }
+        #new-game-btn { padding:8px 16px; background:#2a2a4e; border:1px solid #f0a500; border-radius:8px; color:#f0a500; font-weight:bold; cursor:pointer; margin-bottom:10px; }
+        #new-game-btn:hover { background:#3a3a5e; }
+        #session-info { color:#888; font-size:12px; margin-bottom:10px; }
+        #violation-banner { display:none; background:#3a1f1f; border:1px solid #e07070; border-radius:6px; color:#ffb0b0; padding:8px 12px; font-size:13px; margin-bottom:10px; }
+        .dm-text { color:#f0a500; margin-bottom:10px; }
+        .player-text { color:#e0e0e0; margin-bottom:10px; }
+        .baseline-tag { color:#ff8080; font-size:11px; font-style:italic; }
+        #loading { color:#f0a500; display:none; }
+        body.baseline-mode #player-stats { opacity:0.25; }
+        body.baseline-mode h1::after { content:" — BASELINE"; color:#ff8080; font-size:14px; }
+    </style>
+</head>
+<body>
+    <h1>⚔️ AI Dungeon Master ⚔️</h1>
+
+    <div id="mode-bar">
+        <button id="mode-structured" class="mode-btn active" onclick="setMode('structured')">🛡️ Structured System</button>
+        <button id="mode-baseline" class="mode-btn" onclick="setMode('baseline')">📜 Baseline (Free-form)</button>
+    </div>
+
+    <button id="new-game-btn" onclick="newGame()">🔄 New Game</button>
+    <div id="session-info">
+        Mode: <strong id="mode-label">Structured</strong> &nbsp;|&nbsp;
+        Session: <span id="session-id">(none)</span>
+    </div>
+
+    <div id="violation-banner">⚠️ Validator caught <span id="violation-count">0</span> issue(s) on the last turn. See console for details.</div>
+
+    <div id="player-stats">
+        <span class="stat">❤️ Health: <span id="health">100</span></span>
+        <span class="stat">🎒 Inventory: <span id="inventory">Torch, Dagger</span></span>
+        <span class="stat">📜 Quest: <span id="quest">Find the lost sword of Eldoria</span></span>
+        <span class="stat">📍 Location: <span id="location">Village entrance</span></span>
+    </div>
+
+    <div id="story-display">
+        <p class="dm-text">🎲 DM: You stand at the entrance of the dark forest. Your quest: Find the lost sword of Eldoria. What do you do?</p>
+    </div>
+
+    <div id="choices"></div>
+
+    <p id="loading">🎲 DM is thinking...</p>
+
+    <div id="input-area">
+        <input type="text" id="player-input" placeholder="What do you do?"/>
+        <button id="submit-btn" onclick="sendAction()">Send ⚔️</button>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:8000";
+
+        // ---- Mode ----
+        function getMode() { return localStorage.getItem('dm_mode') || 'structured'; }
+        function setMode(mode) {
+            localStorage.setItem('dm_mode', mode);
+            applyModeUI();
+        }
+        function renderHistory(history, mode) {
+            const display = document.getElementById('story-display');
+            display.innerHTML = '';
+
+            // Mode banner at the top
+            const banner = document.createElement('p');
+            banner.className = 'dm-text';
+            banner.style.fontStyle = 'italic';
+            banner.style.opacity = '0.7';
+            banner.textContent = mode === 'baseline'
+                ? '— Baseline mode (free-form, no state tracking, no validation) —'
+                : '— Structured mode (state tracking, validation, memory) —';
+            display.appendChild(banner);
+
+            if (!history || history.length === 0) {
+                const p = document.createElement('p');
+                p.className = 'dm-text';
+                p.textContent = '🎲 DM: Click "🔄 New Game" to begin your adventure.';
+                display.appendChild(p);
+                return;
+            }
+
+            history.forEach(line => {
+                const p = document.createElement('p');
+                if (line.startsWith('Player: ')) {
+                    p.className = 'player-text';
+                    p.textContent = '🧙 You: ' + line.substring(8);
+                } else if (line.startsWith('DM: ')) {
+                    p.className = 'dm-text';
+                    const label = mode === 'baseline' ? '🎲 DM (baseline): ' : '🎲 DM: ';
+                    p.textContent = label + line.substring(4);
+                }
+                display.appendChild(p);
+            });
+            display.scrollTop = display.scrollHeight;
+        }
+
+        function renderChoices(choices) {
+            const choicesDiv = document.getElementById('choices');
+            choicesDiv.innerHTML = '';
+            if (!choices || !choices.length) return;
+            choices.forEach(choice => {
+                const btn = document.createElement('button');
+                btn.className = 'choice-btn';
+                btn.textContent = choice;
+                btn.onclick = () => sendAction(choice);
+                choicesDiv.appendChild(btn);
+            });
+        }
+
+        function choicesKey(sid) { return 'dm_choices_' + sid; }
+
+        async function applyModeUI() {
+            const mode = getMode();
+            document.body.classList.toggle('baseline-mode', mode === 'baseline');
+            document.getElementById('mode-structured').classList.toggle('active', mode === 'structured');
+            document.getElementById('mode-baseline').classList.toggle('active', mode === 'baseline');
+            document.getElementById('mode-label').textContent = mode === 'structured' ? 'Structured' : 'Baseline (Free-form)';
+            document.getElementById('choices').innerHTML = '';
+            document.getElementById('violation-banner').style.display = 'none';
+
+            const sid = getSessionId();
+            document.getElementById('session-id').textContent = sid ? sid.slice(0, 8) + '...' : '(none)';
+
+            // Try to restore this mode's saved conversation from the server
+            let session = null;
+            if (sid) {
+                try {
+                    const url = mode === 'baseline'
+                        ? `${API_URL}/baseline/session/${sid}`
+                        : `${API_URL}/session/${sid}`;
+                    const r = await fetch(url);
+                    if (r.ok) session = await r.json();
+                } catch (e) { /* ignore */ }
+            }
+
+            renderHistory(session ? session.conversation_history : [], mode);
+
+            // Stats panel
+            if (mode === 'baseline') {
+                document.getElementById('health').textContent = '—';
+                document.getElementById('inventory').textContent = '—';
+                document.getElementById('quest').textContent = '—';
+                document.getElementById('location').textContent = '—';
+            } else if (session && session.player_state) {
+                document.getElementById('health').textContent = session.player_state.health;
+                document.getElementById('inventory').textContent = session.player_state.inventory.join(', ');
+                document.getElementById('quest').textContent = session.player_state.quest;
+                document.getElementById('location').textContent = session.player_state.location;
+            } else {
+                document.getElementById('health').textContent = '100';
+                document.getElementById('inventory').textContent = 'Torch, Dagger';
+                document.getElementById('quest').textContent = 'Find the lost sword of Eldoria';
+                document.getElementById('location').textContent = 'Village entrance';
+            }
+
+            // Restore last-turn choices for structured mode
+            if (mode === 'structured' && sid) {
+                const saved = JSON.parse(localStorage.getItem(choicesKey(sid)) || '[]');
+                renderChoices(saved);
+            }
+        }
+
+        // ---- Session ----
+        function sessionKey() { return getMode() === 'baseline' ? 'dm_baseline_session_id' : 'dm_session_id'; }
+        function getSessionId() { return localStorage.getItem(sessionKey()) || null; }
+        function setSessionId(id) {
+            if (!id) return;
+            localStorage.setItem(sessionKey(), id);
+            document.getElementById('session-id').textContent = id.slice(0, 8) + '...';
+        }
+
+        (function init() {
+            applyModeUI();
+            const existing = getSessionId();
+            if (existing) document.getElementById('session-id').textContent = existing.slice(0, 8) + '...';
+            else document.getElementById('session-id').textContent = '(none)';
+        })();
+
+        async function newGame() {
+            const mode = getMode();
+            const url = mode === 'baseline' ? `${API_URL}/baseline/reset` : `${API_URL}/reset`;
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: getSessionId() })
+                });
+                const data = await response.json();
+                const oldSid = getSessionId();
+                if (oldSid) localStorage.removeItem(choicesKey(oldSid));
+                setSessionId(data.session_id);
+
+                document.getElementById('choices').innerHTML = '';
+                document.getElementById('violation-banner').style.display = 'none';
+                document.getElementById('story-display').innerHTML = '';
+
+                // Mode banner
+                const banner = document.createElement('p');
+                banner.className = 'dm-text';
+                banner.style.fontStyle = 'italic';
+                banner.style.opacity = '0.7';
+                banner.textContent = mode === 'baseline'
+                    ? '— Baseline mode (free-form, no state tracking, no validation) —'
+                    : '— Structured mode (state tracking, validation, memory) —';
+                document.getElementById('story-display').appendChild(banner);
+
+                if (mode === 'structured' && data.player_state) {
+                    document.getElementById('health').textContent = data.player_state.health;
+                    document.getElementById('inventory').textContent = data.player_state.inventory.join(', ');
+                    document.getElementById('quest').textContent = data.player_state.quest;
+                    document.getElementById('location').textContent = data.player_state.location;
+                } else if (mode === 'baseline') {
+                    document.getElementById('health').textContent = '—';
+                    document.getElementById('inventory').textContent = '—';
+                    document.getElementById('quest').textContent = '—';
+                    document.getElementById('location').textContent = '—';
+                }
+
+                // Kick off the adventure with an opening action so the LLM narrates the start.
+                sendAction('Begin my adventure. Describe the opening scene.');
+            } catch (e) {
+                alert('Failed to reset: ' + e.message);
+            }
+        }
+
+        async function sendAction(action) {
+            const input = document.getElementById('player-input');
+            const userAction = action || input.value.trim();
+            if (!userAction) return;
+
+            const mode = getMode();
+            const storyDisplay = document.getElementById('story-display');
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('choices').innerHTML = '';
+            document.getElementById('violation-banner').style.display = 'none';
+
+            const playerP = document.createElement('p');
+            playerP.className = 'player-text';
+            playerP.textContent = '🧙 You: ' + userAction;
+            storyDisplay.appendChild(playerP);
+            input.value = '';
+
+            const url = mode === 'baseline' ? `${API_URL}/baseline/action` : `${API_URL}/action`;
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: userAction, session_id: getSessionId() })
+                });
+
+                const data = await response.json();
+                if (data.session_id) setSessionId(data.session_id);
+
+                const dmP = document.createElement('p');
+                dmP.className = 'dm-text';
+                let label = '🎲 DM: ';
+                if (mode === 'baseline') label = '🎲 DM (baseline): ';
+                dmP.textContent = label + data.narrative;
+                storyDisplay.appendChild(dmP);
+
+                if (mode === 'structured') {
+                    if (data.npc_dialogue) {
+                        const npcP = document.createElement('p');
+                        npcP.className = 'dm-text';
+                        npcP.textContent = '💬 NPC: ' + data.npc_dialogue;
+                        storyDisplay.appendChild(npcP);
+                    }
+                    if (data.player_state) {
+                        document.getElementById('health').textContent = data.player_state.health;
+                        document.getElementById('inventory').textContent = data.player_state.inventory.join(', ');
+                        document.getElementById('quest').textContent = data.player_state.quest;
+                        document.getElementById('location').textContent = data.player_state.location;
+                    }
+                    if (data.choices && data.choices.length > 0) {
+                        renderChoices(data.choices);
+                        if (data.session_id) {
+                            localStorage.setItem(choicesKey(data.session_id), JSON.stringify(data.choices));
+                        }
+                    }
+                    if (data.violations && data.violations.length > 0) {
+                        document.getElementById('violation-count').textContent = data.violations.length;
+                        document.getElementById('violation-banner').style.display = 'block';
+                        console.warn('[Validator] caught violations:', data.violations);
+                    }
+                }
+            } catch (error) {
+                const errP = document.createElement('p');
+                errP.className = 'dm-text';
+                errP.textContent = '❌ Error connecting to server. ' + error.message;
+                storyDisplay.appendChild(errP);
+            }
+
+            document.getElementById('loading').style.display = 'none';
+            storyDisplay.scrollTop = storyDisplay.scrollHeight;
+        }
+
+        document.getElementById('player-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendAction();
+        });
+    </script>
+</body>
+</html>

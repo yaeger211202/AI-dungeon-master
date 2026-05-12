@@ -1,0 +1,23 @@
+# Secrets
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Local-only demo materials (kept off the public repo)
+backend/ai_dungeon_master_demo.pptx
+DEMO_SCRIPT.md
+
+# Temp / lockfiles
+*.tmp
+*.json.tmp
